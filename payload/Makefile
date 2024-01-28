@@ -1,7 +1,6 @@
-CFLAGS=-static -O0
+CFLAGS=--static-pie  -T ./static-pie.ld  -O0 -g
 LDFLAGS=-T ./static-pie.ld
 
 build:
-	$(CC) $(CFLAGS) -c ./main.c
-	$(LD) $(LDFLAGS) ./main.o -o main
-	strip main
+	gcc $(CFLAGS) -o main ./main.c
+	#strip main
