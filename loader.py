@@ -8,11 +8,10 @@ import struct
 
 from elftools.elf.elffile import ELFFile
 import ctypes
-import time
 
 from keystone import Ks, KS_ARCH_X86, KS_MODE_64
 
-SIGALRM = 14
+SIGALRM = 0x0e
 
 PROT_READ = 0x01
 PROT_WRITE = 0x02
@@ -358,8 +357,7 @@ class SHELFLoader:
 
         # Take control
         libc.signal(SIGALRM, setup_code)
-        libc.alarm(1)
-        time.sleep(0x1)
+        libc.gsignal(SIGALRM)
 
     def run(self, argv, envv=os.environ):
         stack = self.create_stack(argv, envv)
