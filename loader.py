@@ -123,8 +123,15 @@ class Stack:
     Create a stack.
     """
 
-    def __init__(self, base, size):
-        self._base = base
+    def __init__(self, size):
+        self._base = libc.mmap(
+            0x00,
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0
+        )
         self._size = size
         self._res = bytearray(b'\x00' * size)
         self._pos = size
@@ -180,7 +187,7 @@ class Stack:
 
 
 class SHELFLoader:
-    ARCH = 'x86-64'
+    ARCH = 'x86_64'
 
     def __init__(self, data):
         self.load(data)
@@ -257,17 +264,8 @@ class SHELFLoader:
         self._entrypoint = entrypoint
 
     def create_stack(self, argv, envv):
-        stack = libc.mmap(
-            0x00,
-            STACK_SIZE,
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1,
-            0
-        )
-
         # Now create our initial stack
-        new_stack = Stack(stack, STACK_SIZE)
+        new_stack = Stack(STACK_SIZE)
 
         new_stack.push(b'HEREHEREHEREHERE')
         new_stack.push(b'\x00'*16)
@@ -277,8 +275,7 @@ class SHELFLoader:
         env_addr = [
             new_stack.push_env_str(k, v) for k, v in envv.items()
         ]
-        env_addr += [0]
-        arg_addr = [new_stack.push_str(k) for k in argv] + [0]
+        arg_addr = [new_stack.push_str(k) for k in argv]
 
         new_stack.pad()
 
@@ -307,10 +304,12 @@ class SHELFLoader:
         new_stack.push_auxv(AT_SYSINFO_EHDR, libc.getauxval(AT_SYSINFO_EHDR))
 
         # push the env
+        new_stack.push_int(0)
         for env in env_addr[::-1]:
             new_stack.push_int(env)
 
         # push the argv
+        new_stack.push_int(0)
         for arg in arg_addr[::-1]:
             new_stack.push_int(arg)
 
