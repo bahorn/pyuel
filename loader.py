@@ -5,6 +5,7 @@ import os
 import sys
 import math
 import struct
+import io
 
 from elftools.elf.elffile import ELFFile
 import ctypes
@@ -181,72 +182,74 @@ class Stack:
 class SHELFLoader:
     ARCH = 'x86-64'
 
-    def __init__(self, file):
-        self.load(file)
+    def __init__(self, data):
+        self.load(data)
 
-    def load(self, file):
+    def load(self, data):
         entrypoint = None
-        with open(file, 'rb') as f:
-            elffile = ELFFile(f)
-            base_entrypoint = elffile.header.e_entry
-            phdr_offset = elffile.header.e_phoff
-            phdr_size = elffile.header.e_phentsize
-            phdr_num = elffile.header.e_phnum
 
-            for segment in elffile.iter_segments(type='PT_LOAD'):
-                vaddr = segment['p_vaddr']
-                memsz = become_page(segment['p_memsz'])
+        f = io.BytesIO(data)
 
-                if segment['p_memsz'] == 0:
-                    continue
+        elffile = ELFFile(f)
+        base_entrypoint = elffile.header.e_entry
+        phdr_offset = elffile.header.e_phoff
+        phdr_size = elffile.header.e_phentsize
+        phdr_num = elffile.header.e_phnum
 
-                flags = MAP_PRIVATE | MAP_ANONYMOUS
+        for segment in elffile.iter_segments(type='PT_LOAD'):
+            vaddr = segment['p_vaddr']
+            memsz = become_page(segment['p_memsz'])
 
-                if vaddr != 0:
-                    flags |= MAP_FIXED
+            if segment['p_memsz'] == 0:
+                continue
 
-                # Allocate
-                res = libc.mmap(
-                    0,
-                    memsz,
-                    PROT_READ | PROT_WRITE,
-                    flags,
-                    -1,
-                    0
-                )
+            flags = MAP_PRIVATE | MAP_ANONYMOUS
 
-                if res == -1:
-                    raise Exception(f'{vaddr:x} {memsz} - MMAP Failed')
+            if vaddr != 0:
+                flags |= MAP_FIXED
 
-                libc.memset(res, 0, memsz)
+            # Allocate
+            res = libc.mmap(
+                0,
+                memsz,
+                PROT_READ | PROT_WRITE,
+                flags,
+                -1,
+                0
+            )
 
-                # copy in
-                segment_data = bytearray(segment.data())[:memsz]
-                d_a = ctypes.c_char * len(segment_data)
+            if res == -1:
+                raise Exception(f'{vaddr:x} {memsz} - MMAP Failed')
 
-                libc.memcpy(
-                    res,
-                    ctypes.pointer(d_a.from_buffer(segment_data)),
-                    len(segment_data)
-                )
+            libc.memset(res, 0, memsz)
 
-                # Fix permissions
-                es = PROT_EXEC if (segment['p_flags'] & 0x1) > 0 else 0
-                ws = PROT_WRITE if (segment['p_flags'] & 0x2) > 0 else 0
-                rs = PROT_READ if (segment['p_flags'] & 0x4) > 0 else 0
+            # copy in
+            segment_data = bytearray(segment.data())[:memsz]
+            d_a = ctypes.c_char * len(segment_data)
 
-                libc.mprotect(
-                    res,
-                    memsz,
-                    es | ws | rs
-                )
+            libc.memcpy(
+                res,
+                ctypes.pointer(d_a.from_buffer(segment_data)),
+                len(segment_data)
+            )
 
-                if in_range(base_entrypoint, vaddr, vaddr + memsz):
-                    entrypoint = res + vaddr + base_entrypoint
-                    phdr_offset += res + vaddr
+            # Fix permissions
+            es = PROT_EXEC if (segment['p_flags'] & 0x1) > 0 else 0
+            ws = PROT_WRITE if (segment['p_flags'] & 0x2) > 0 else 0
+            rs = PROT_READ if (segment['p_flags'] & 0x4) > 0 else 0
 
-                # Should only be one PT_LOAD segment
-                break
+            libc.mprotect(
+                res,
+                memsz,
+                es | ws | rs
+            )
+
+            if in_range(base_entrypoint, vaddr, vaddr + memsz):
+                entrypoint = res + vaddr + base_entrypoint
+                phdr_offset += res + vaddr
+
+            # Should only be one PT_LOAD segment
+            break
 
         self._phdr_offset = phdr_offset
         self._phdr_size = phdr_size
@@ -365,7 +368,10 @@ class SHELFLoader:
 
 
 def main():
-    sl = SHELFLoader(sys.argv[1])
+    data = None
+    with open(sys.argv[1], 'rb') as f:
+        data = f.read()
+    sl = SHELFLoader(data)
     sl.run(['hello', 'world'], envv={'HOME': '/tmp'})
 
 
