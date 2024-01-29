@@ -187,9 +187,9 @@ class SHELFLoader:
     FILENAME = '/fakename'
 
     def __init__(self, data):
-        self.load(data)
+        self._load(data)
 
-    def load(self, data):
+    def _load(self, data):
         vaddr = data['vaddr']
         memsz = data['memsz']
         flags = MAP_PRIVATE | MAP_ANONYMOUS
@@ -242,7 +242,7 @@ class SHELFLoader:
         self._phdr_num = data['phdr']['num']
         self._entrypoint = entrypoint
 
-    def create_stack(self, argv, envv):
+    def _create_stack(self, argv, envv):
         # Now create our initial stack
         new_stack = Stack(STACK_SIZE)
 
@@ -301,12 +301,12 @@ class SHELFLoader:
 
         return new_stack
 
-    def jump_to_code(self, stack):
+    def _setup_loader(self, stack):
         """
         Create a small stub to place the code at, and use that to transition
         control.
         """
-        target_size = 4096
+        target_size = PAGE_SIZE
 
         # Get some memory for our setup code
         setup_code = libc.mmap(
@@ -318,10 +318,13 @@ class SHELFLoader:
             0
         )
 
-        # Copy the setup code in
         print('entrypoint: ', hex(self._entrypoint))
+
+        # Copy the setup code in
         data = loader(self._entrypoint, stack.pos())
         char_array = ctypes.c_char * len(data)
+
+        assert len(data) <= target_size
 
         libc.memcpy(
             setup_code,
@@ -336,13 +339,19 @@ class SHELFLoader:
             PROT_READ | PROT_EXEC
         )
 
-        # Take control
-        libc.signal(SIGALRM, setup_code)
+        return setup_code
+
+    def _jump(self, address):
+        """
+        Jump to an address in memory
+        """
+        libc.signal(SIGALRM, address)
         libc.gsignal(SIGALRM)
 
     def run(self, argv, envv=os.environ):
-        stack = self.create_stack(argv, envv)
-        self.jump_to_code(stack)
+        stack = self._create_stack(argv, envv)
+        loader_address = self._setup_loader(stack)
+        self._jump(loader_address)
 
 
 def main():
