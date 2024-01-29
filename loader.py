@@ -6,9 +6,10 @@ import os
 import sys
 import math
 import struct
-import io
+import base64
+import json
+import zlib
 
-from elftools.elf.elffile import ELFFile
 import ctypes
 
 SIGALRM = 0x0e
@@ -195,74 +196,56 @@ class SHELFLoader:
         self.load(data)
 
     def load(self, data):
-        entrypoint = None
+        vaddr = data['vaddr']
+        memsz = data['memsz']
+        flags = MAP_PRIVATE | MAP_ANONYMOUS
 
-        f = io.BytesIO(data)
+        if vaddr != 0:
+            flags |= MAP_FIXED
 
-        elffile = ELFFile(f)
-        base_entrypoint = elffile.header.e_entry
-        phdr_offset = elffile.header.e_phoff
-        phdr_size = elffile.header.e_phentsize
-        phdr_num = elffile.header.e_phnum
+        # Allocate
+        res = libc.mmap(
+            vaddr,
+            memsz,
+            PROT_READ | PROT_WRITE,
+            flags,
+            -1,
+            0
+        )
 
-        for segment in elffile.iter_segments(type='PT_LOAD'):
-            vaddr = segment['p_vaddr']
-            memsz = become_page(segment['p_memsz'])
+        if res == -1:
+            raise Exception('mmaping code Failed')
 
-            if segment['p_memsz'] == 0:
-                continue
+        libc.memset(res, 0, memsz)
 
-            flags = MAP_PRIVATE | MAP_ANONYMOUS
+        unpacked_data = bytearray(
+            zlib.decompress(base64.b64decode(data['data']))
+        )
 
-            if vaddr != 0:
-                flags |= MAP_FIXED
+        # copy in
+        d_a = ctypes.c_char * len(unpacked_data)
 
-            # Allocate
-            res = libc.mmap(
-                0,
-                memsz,
-                PROT_READ | PROT_WRITE,
-                flags,
-                -1,
-                0
-            )
+        libc.memcpy(
+            res,
+            ctypes.pointer(d_a.from_buffer(unpacked_data)),
+            len(unpacked_data)
+        )
 
-            if res == -1:
-                raise Exception(f'{vaddr:x} {memsz} - MMAP Failed')
+        # Fix permissions
+        es = PROT_EXEC if data['perm_x'] else 0
+        ws = PROT_WRITE if data['perm_w'] else 0
+        rs = PROT_READ if data['perm_r'] else 0
 
-            libc.memset(res, 0, memsz)
+        libc.mprotect(
+            res,
+            memsz,
+            es | ws | rs
+        )
 
-            # copy in
-            segment_data = bytearray(segment.data())[:memsz]
-            d_a = ctypes.c_char * len(segment_data)
-
-            libc.memcpy(
-                res,
-                ctypes.pointer(d_a.from_buffer(segment_data)),
-                len(segment_data)
-            )
-
-            # Fix permissions
-            es = PROT_EXEC if (segment['p_flags'] & 0x1) > 0 else 0
-            ws = PROT_WRITE if (segment['p_flags'] & 0x2) > 0 else 0
-            rs = PROT_READ if (segment['p_flags'] & 0x4) > 0 else 0
-
-            libc.mprotect(
-                res,
-                memsz,
-                es | ws | rs
-            )
-
-            if in_range(base_entrypoint, vaddr, vaddr + memsz):
-                entrypoint = res + vaddr + base_entrypoint
-                phdr_offset += res + vaddr
-
-            # Should only be one PT_LOAD segment
-            break
-
-        self._phdr_offset = phdr_offset
-        self._phdr_size = phdr_size
-        self._phdr_num = phdr_num
+        entrypoint = res + data['entrypoint']
+        self._phdr_offset = res + vaddr + data['phdr']['offset']
+        self._phdr_size = data['phdr']['size']
+        self._phdr_num = data['phdr']['num']
         self._entrypoint = entrypoint
 
     def create_stack(self, argv, envv):
@@ -344,8 +327,6 @@ class SHELFLoader:
         data = loader(self._entrypoint, stack.pos())
         char_array = ctypes.c_char * len(data)
 
-        print(hex(setup_code))
-
         libc.memcpy(
             setup_code,
             ctypes.pointer(char_array.from_buffer(data)),
@@ -369,9 +350,8 @@ class SHELFLoader:
 
 
 def main():
-    data = None
     with open(sys.argv[1], 'rb') as f:
-        data = f.read()
+        data = json.load(f)
     sl = SHELFLoader(data)
     sl.run(['hello', 'world'], envv={'HOME': '/tmp'})
 
