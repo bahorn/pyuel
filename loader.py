@@ -4,7 +4,6 @@ Python + ctypes implementation of a ulexec()
 import binascii
 import os
 import sys
-import math
 import struct
 import base64
 import json
@@ -92,14 +91,6 @@ libc.getauxval.restype = ctypes.c_ulong
 libc.getauxval.argtypes = [ctypes.c_ulong]
 
 libc.signal.argtypes = [ctypes.c_int, ctypes.c_ulonglong]
-
-
-def become_page(size):
-    return math.ceil(size / PAGE_SIZE) * PAGE_SIZE
-
-
-def in_range(value, start, end):
-    return (start <= value) and (value <= end)
 
 
 def loader(address, stack):
