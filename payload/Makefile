@@ -1,6 +1,8 @@
-CFLAGS=--static-pie -flto -T ./static-pie.ld  -O0 -g
+CC=gcc
+CFLAGS=--static-pie -flto -T ./static-pie.ld -Os
 LDFLAGS=-T ./static-pie.ld
 
+
 build:
-	gcc $(CFLAGS) -o main ./main.c
+	$(CC) $(CFLAGS) -o main ./main.c
 	strip main
