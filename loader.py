@@ -1,6 +1,7 @@
 """
 Python + ctypes implementation of a ulexec()
 """
+import binascii
 import os
 import sys
 import math
@@ -9,8 +10,6 @@ import io
 
 from elftools.elf.elffile import ELFFile
 import ctypes
-
-from keystone import Ks, KS_ARCH_X86, KS_MODE_64
 
 SIGALRM = 0x0e
 
@@ -106,16 +105,19 @@ def loader(address, stack):
     """
     Changes the stack, and jumps to the code
     """
-    ks = Ks(KS_ARCH_X86, KS_MODE_64)
-    print(hex(stack))
-    loader_code = f"""
-        mov rsp, 0x{stack:08x}
-        xor rdx, rdx
-        mov rax, 0x{address:08x}
-        jmp rax
-    """
-    encoding, count = ks.asm(loader_code)
-    return bytearray(encoding)
+    # from gen_asm.py
+    template = binascii.unhexlify(
+        '48bc58575655545352514831d248b84847464544434241ffe0'
+    )
+    t = template.replace(
+        struct.pack('<Q', 0x4142434445464748),
+        struct.pack('<Q', address)
+    )
+    t = t.replace(
+        struct.pack('<Q', 0x5152535455565758),
+        struct.pack('<Q', stack)
+    )
+    return bytearray(t)
 
 
 class Stack:
