@@ -13,6 +13,8 @@ import ctypes
 
 SIGALRM = 0x0e
 
+# Flags for `mmap()` and `mprotect()`
+
 PROT_READ = 0x01
 PROT_WRITE = 0x02
 PROT_EXEC = 0x04
@@ -21,16 +23,13 @@ MAP_PRIVATE = 0x02
 MAP_ANONYMOUS = 0x20
 MAP_FIXED = 0x10
 
-
 KB = 1024
 MB = 1024 * KB
 STACK_SIZE = 10 * MB
+PAGE_SIZE = 4 * KB
 
-PAGE_SIZE = 4096
 
-
-# All the AUXV
-
+# AUXV values taken from the kernel and the LWN article on how ELFs get run
 AT_NULL = 0
 AT_IGNORE = 1
 AT_EXECFD = 2
@@ -181,7 +180,11 @@ class Stack:
 
 
 class SHELFLoader:
+    # Arch for the auxv AT_PLATFORM
     ARCH = 'x86_64'
+
+    # Filename for the auxv AT_EXECFN
+    FILENAME = '/fakename'
 
     def __init__(self, data):
         self.load(data)
@@ -243,10 +246,12 @@ class SHELFLoader:
         # Now create our initial stack
         new_stack = Stack(STACK_SIZE)
 
+        # Marker for debugging
         new_stack.push(b'HEREHEREHEREHERE')
         new_stack.push(b'\x00'*16)
+
         # Env
-        at_execfn = new_stack.push_str('./fakename')
+        at_execfn = new_stack.push_str(self.FILENAME)
 
         env_addr = [
             new_stack.push_env_str(k, v) for k, v in envv.items()
@@ -290,7 +295,7 @@ class SHELFLoader:
             new_stack.push_int(arg)
 
         # argc
-        new_stack.push_int(len(argv) - 1)
+        new_stack.push_int(len(argv))
 
         new_stack.copyin()
 
@@ -344,7 +349,10 @@ def main():
     with open(sys.argv[1], 'rb') as f:
         data = json.load(f)
     sl = SHELFLoader(data)
-    sl.run(['hello', 'world'], envv={'HOME': '/tmp'})
+    sl.run(
+        ['hello', 'world'],
+        envv=os.environ
+    )
 
 
 if __name__ == "__main__":
