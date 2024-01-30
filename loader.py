@@ -358,10 +358,7 @@ def main():
     with open(sys.argv[1], 'rb') as f:
         data = json.load(f)
     sl = SHELFLoader(data)
-    sl.run(
-        ['hello', 'world'],
-        envv=os.environ
-    )
+    sl.run(['this', 'is', 'not', 'a', 'place', 'of', 'honor'], envv=os.environ)
 
 
 if __name__ == "__main__":
